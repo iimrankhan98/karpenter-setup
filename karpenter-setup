@@ -1,1 +1,187 @@
+# Step:1
+echo '{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "Service": "ec2.amazonaws.com"
+            },
+            "Action": "sts:AssumeRole"
+        }
+    ]
+}' > node-trust-policy.json
+
+aws iam create-role --role-name "KarpenterNodeRole-visionway-eks-cluster" \
+    --assume-role-policy-document file://node-trust-policy.json
+
+# Step:2
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "sts:AssumeRoleWithWebIdentity",
+            "Principal": {
+                "Federated": "arn:aws:iam::650378210006:oidc-provider/oidc.eks.ap-south-1.amazonaws.com/id/1F69B2B1869074CDAF34003DCA8C25BE"
+            },
+            "Condition": {
+                "StringEquals": {
+                    "oidc.eks.ap-south-1.amazonaws.com/id/1F69B2B1869074CDAF34003DCA8C25BE:aud": [
+                        "sts.amazonaws.com"
+                    ]
+                }
+            }
+        }
+    ]
+}
+EOF
+aws iam create-role --role-name "KarpenterControllerRole-visionway-eks-cluster" \
+    --assume-role-policy-document file://controller-trust-policy.json
+
+cat << EOF > controller-policy.json
+{
+	"Statement": [
+		{
+			"Action": [
+				"ssm:GetParameter",
+				"ec2:DescribeImages",
+				"ec2:RunInstances",
+				"ec2:DescribeSubnets",
+				"ec2:DescribeSecurityGroups",
+				"ec2:DescribeLaunchTemplates",
+				"ec2:DescribeInstances",
+				"ec2:DescribeInstanceTypes",
+				"ec2:DescribeInstanceTypeOfferings",
+				"ec2:DeleteLaunchTemplate",
+				"ec2:CreateTags",
+				"ec2:CreateLaunchTemplate",
+				"ec2:CreateFleet",
+				"ec2:DescribeSpotPriceHistory",
+				"pricing:GetProducts"
+			],
+			"Effect": "Allow",
+			"Resource": "*",
+			"Sid": "Karpenter"
+		},
+		{
+			"Action": "ec2:TerminateInstances",
+			"Condition": {
+				"StringLike": {
+					"ec2:ResourceTag/karpenter.sh/nodepool": "*"
+				}
+			},
+			"Effect": "Allow",
+			"Resource": "*",
+			"Sid": "ConditionalEC2Termination"
+		},
+		{
+			"Effect": "Allow",
+			"Action": "iam:PassRole",
+			"Resource": "arn:aws:iam::650378210006:role/KarpenterNodeRole-visionway-eks-cluster",
+			"Sid": "PassNodeIAMRole"
+		},
+		{
+			"Effect": "Allow",
+			"Action": "eks:DescribeCluster",
+			"Resource": "arn:aws:eks:ap-south-1:650378210006:cluster/visionway-eks-cluster",
+			"Sid": "EKSClusterEndpointLookup"
+		},
+		{
+			"Sid": "AllowScopedInstanceProfileCreationActions",
+			"Effect": "Allow",
+			"Resource": "*",
+			"Action": [
+				"iam:CreateInstanceProfile"
+			],
+			"Condition": {
+				"StringEquals": {
+					"aws:RequestTag/kubernetes.io/cluster/visionway-eks-cluster": "owned",
+					"aws:RequestTag/topology.kubernetes.io/region": "ap-south-1"
+				},
+				"StringLike": {
+					"aws:RequestTag/karpenter.k8s.aws/ec2nodeclass": "*"
+				}
+			}
+		},
+		{
+			"Sid": "AllowScopedInstanceProfileTagActions",
+			"Effect": "Allow",
+			"Resource": "*",
+			"Action": [
+				"iam:TagInstanceProfile"
+			],
+			"Condition": {
+				"StringEquals": {
+					"aws:ResourceTag/kubernetes.io/cluster/visionway-eks-cluster": "owned",
+					"aws:ResourceTag/topology.kubernetes.io/region": "ap-south-1",
+					"aws:RequestTag/kubernetes.io/cluster/visionway-eks-cluster": "owned",
+					"aws:RequestTag/topology.kubernetes.io/region": "ap-south-1"
+				},
+				"StringLike": {
+					"aws:ResourceTag/karpenter.k8s.aws/ec2nodeclass": "*",
+					"aws:RequestTag/karpenter.k8s.aws/ec2nodeclass": "*"
+				}
+			}
+		},
+		{
+			"Sid": "AllowScopedInstanceProfileActions",
+			"Effect": "Allow",
+			"Resource": "*",
+			"Action": [
+				"iam:AddRoleToInstanceProfile",
+				"iam:RemoveRoleFromInstanceProfile",
+				"iam:DeleteInstanceProfile"
+			],
+			"Condition": {
+				"StringEquals": {
+					"aws:ResourceTag/kubernetes.io/cluster/visionway-eks-cluster": "owned",
+					"aws:ResourceTag/topology.kubernetes.io/region": "ap-south-1"
+				},
+				"StringLike": {
+					"aws:ResourceTag/karpenter.k8s.aws/ec2nodeclass": "*"
+				}
+			}
+		},
+		{
+			"Sid": "AllowInstanceProfileReadActions",
+			"Effect": "Allow",
+			"Resource": "*",
+			"Action": "iam:GetInstanceProfile"
+		}
+	],
+	"Version": "2012-10-17"
+}
+EOF
+aws iam put-role-policy --role-name "KarpenterControllerRole-${CLUSTER_NAME}" \
+    --policy-name "KarpenterControllerPolicy-${CLUSTER_NAME}" \
+    --policy-document file://controller-policy.json
+
+# Step:3
+Add tag manually in subnet and security group [key=karpenter.sh/discovery and value=visionway-eks-cluster]
+
+for NODEGROUP in $(aws eks list-nodegroups --cluster-name "${CLUSTER_NAME}" --query 'nodegroups' --output text); do
+    aws ec2 create-tags \
+        --tags "Key=karpenter.sh/discovery,Value=${CLUSTER_NAME}" \
+        --resources $(aws eks describe-nodegroup --cluster-name "${CLUSTER_NAME}" \
+        --nodegroup-name "${NODEGROUP}" --query 'nodegroup.subnets' --output text )
+done
+
+# Step:4
+helm repo add karpenter https://charts.karpenter.sh
+helm repo update
+
+helm install karpenter karpenter/karpenter \
+  --namespace karpenter \
+  --create-namespace \
+  --set clusterName=visionway-eks-cluster \
+  --set clusterEndpoint=$(aws eks describe-cluster --name visionway-eks-cluster --query "cluster.endpoint" --output text) \
+  --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=arn:aws:iam::650378210006:role/KarpenterControllerRole-visionway-eks-cluster \
+  --set controller.resources.requests.cpu=1 \
+  --set controller.resources.requests.memory=1Gi \
+  --set controller.resources.limits.cpu=1 \
+  --set controller.resources.limits.memory=1Gi
+
+kubectl apply -f general-purpose.yaml
+
 
