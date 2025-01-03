@@ -1,5 +1,3 @@
-# This example NodePool will provision general purpose instances
----
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
@@ -37,12 +35,15 @@ metadata:
   annotations:
     kubernetes.io/description: "General purpose EC2NodeClass for running Amazon Linux 2 nodes"
 spec:
-  role: "KarpenterNodeRole-visionway-eks-cluster" # replace with your cluster name
+  amiFamily: "AL2"  # Amazon Linux 2
+  role: "KarpenterNodeRole-visionway-eks-cluster"
   subnetSelectorTerms:
     - tags:
-        karpenter.sh/discovery: "visionway-eks-cluster" # replace with your cluster name
+        karpenter.sh/discovery: "visionway-eks-cluster"
   securityGroupSelectorTerms:
     - tags:
-        karpenter.sh/discovery: "visionway-eks-cluster" # replace with your cluster name
+        karpenter.sh/discovery: "visionway-eks-cluster"
   amiSelectorTerms:
-    - alias: al2023@latest # Amazon Linux 2023
+    - tags:
+        aws:ec2launchtemplate: "true"
+        karpenter.sh/discovery: "visionway-eks-cluster"
