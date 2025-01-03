@@ -182,6 +182,11 @@ helm install karpenter karpenter/karpenter \
   --set controller.resources.limits.cpu=1 \
   --set controller.resources.limits.memory=1Gi
 
+# Step:5
+kubectl apply -f https://raw.githubusercontent.com/aws/karpenter/main/pkg/apis/crds/karpenter.sh_nodepools.yaml
+kubectl apply -f https://raw.githubusercontent.com/aws/karpenter/main/pkg/apis/crds/karpenter.k8s.aws_ec2nodeclasses.yaml
+kubectl get crds | grep karpenter
+
 kubectl apply -f general-purpose.yaml
 
 
