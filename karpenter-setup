@@ -171,22 +171,19 @@ done
 helm repo add karpenter https://charts.karpenter.sh
 helm repo update
 
-helm install karpenter karpenter/karpenter \
-  --namespace karpenter \
-  --create-namespace \
-  --set clusterName=visionway-eks-cluster \
-  --set clusterEndpoint=$(aws eks describe-cluster --name visionway-eks-cluster --query "cluster.endpoint" --output text) \
-  --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=arn:aws:iam::650378210006:role/KarpenterControllerRole-visionway-eks-cluster \
+helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
+  --version "0.37.0" \
+  --namespace "karpenter" --create-namespace \
+  --set "settings.clusterName=visionway-eks-cluster" \
+  --set "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=arn:aws:iam::650378210006:role/KarpenterControllerRole-visionway-eks-cluster" \
   --set controller.resources.requests.cpu=1 \
   --set controller.resources.requests.memory=1Gi \
   --set controller.resources.limits.cpu=1 \
-  --set controller.resources.limits.memory=1Gi
+  --set controller.resources.limits.memory=1Gi \
+  --set replicas=1
 
 # Step:5
-kubectl apply -f https://raw.githubusercontent.com/aws/karpenter/main/pkg/apis/crds/karpenter.sh_nodepools.yaml
-kubectl apply -f https://raw.githubusercontent.com/aws/karpenter/main/pkg/apis/crds/karpenter.k8s.aws_ec2nodeclasses.yaml
 kubectl get crds | grep karpenter
-
 kubectl apply -f general-purpose.yaml
 
 
