@@ -186,4 +186,6 @@ helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
 kubectl get crds | grep karpenter
 kubectl apply -f general-purpose.yaml
 
+kubectl rollout restart deployment karpenter -n karpenter
+
 
