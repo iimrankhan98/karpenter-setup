@@ -183,6 +183,7 @@ helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
   --set replicas=1
 
 # Step:5
+helm uninstall karpenter -n karpenter
 kubectl get crds | grep karpenter
 kubectl apply -f general-purpose.yaml
 
